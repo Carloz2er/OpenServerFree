@@ -1,12 +1,12 @@
 # CZ7 Host - Sistema de Tunelamento FRP via Discord
 
-Bem-vindo ao CZ7 Host! Este projeto é um sistema completo de Fast Reverse Proxy (FRP) que permite aos usuários expor seus serviços locais (como servidores web) à internet de forma segura. O sistema é totalmente gerenciado através de um bot do Discord, proporcionando uma experiência de autoatendimento para seus clientes.
+Bem-vindo ao CZ7 Host! Este projeto é um sistema completo de Fast Reverse Proxy (FRP) que permite aos usuários expor seus serviços locais (como servidores web) à internet de forma segura. O sistema é totalmente gerenciado através de um bot do Discord, proporcionando uma experiência de autoatendimento para seus clientes, com feedback de conexão em tempo real.
 
 ## Componentes do Sistema
 
-1.  **Servidor (`/server`)**: O coração do sistema. É um servidor Python assíncrono que gerencia conexões de clientes, encaminha tráfego e oferece uma API REST para gerenciamento.
+1.  **Servidor (`/server`)**: O coração do sistema. É um servidor Python assíncrono que gerencia conexões de clientes, encaminha tráfego, oferece uma API REST para gerenciamento e envia notificações de status.
 2.  **Cliente (`/client`)**: Um script leve em Python que o usuário final executa em sua máquina local para se conectar ao servidor e expor um serviço.
-3.  **Bot do Discord (`/discord_bot`)**: A interface de usuário. Permite que os clientes criem e gerenciem seus túneis e domínios através de comandos simples no Discord.
+3.  **Bot do Discord (`/discord_bot`)**: A interface de usuário. Permite que os clientes criem e gerenciem seus túneis e domínios, recebendo notificações em tempo real.
 
 ---
 
@@ -23,33 +23,26 @@ Siga estes passos para configurar e implantar todo o sistema CZ7 Host.
 
 ### 1. Configuração do DNS
 
-Esta é a etapa mais importante para o funcionamento dos subdomínios. No painel de controle do seu domínio, configure os seguintes registros:
+No painel de controle do seu domínio, configure os seguintes registros:
 
-- **Registro A**:
-  - **Nome/Host**: `@` ou `cz7host.com` (seu domínio raiz)
-  - **Valor/Aponta para**: O endereço IP do seu servidor.
-- **Registro A (para o serviço de túnel)**:
-  - **Nome/Host**: `tunnel` (ou o nome que preferir)
-  - **Valor/Aponta para**: O endereço IP do seu servidor.
-- **Registro CNAME (Curinga)**:
-  - **Nome/Host**: `*.tunnel`
-  - **Valor/Aponta para**: `tunnel.cz7host.com` (o registro A que você acabou de criar).
-
-Isso fará com que `tunnel.cz7host.com` e qualquer subdomínio como `meu-site.tunnel.cz7host.com` apontem para o seu servidor.
+- **Registro A**: `tunnel.cz7host.com` -> `IP_DO_SEU_SERVIDOR`
+- **Registro CNAME**: `*.tunnel.cz7host.com` -> `tunnel.cz7host.com`
 
 ### 2. Configuração do Servidor
 
-1.  **Clone o repositório** para o seu servidor.
-2.  **Navegue até a pasta do servidor**: `cd cz7host_frp/server`
-3.  **Instale as dependências**: `pip install -r requirements.txt`
-4.  **Crie o arquivo de ambiente**: `touch .env`
-5.  **Edite o arquivo `.env`** com as seguintes variáveis:
+1.  **Navegue até a pasta do servidor**: `cd cz7host_frp/server`
+2.  **Instale as dependências**: `pip install -r requirements.txt`
+3.  **Crie e edite o arquivo `.env`** com as seguintes variáveis:
     ```ini
     # O domínio base que você configurou no DNS
     BASE_DOMAIN=tunnel.cz7host.com
 
     # Uma chave secreta forte para a comunicação entre o bot e o servidor
     API_SECRET_KEY=gere_uma_chave_segura_aqui
+
+    # O endereço para o qual o servidor enviará notificações de conexão.
+    # Deve ser o endereço do seu bot.
+    BOT_CALLBACK_URL=http://127.0.0.1:8081/callback
 
     # Portas (geralmente não precisam ser alteradas)
     SERVER_IP=0.0.0.0
@@ -62,8 +55,7 @@ Isso fará com que `tunnel.cz7host.com` e qualquer subdomínio como `meu-site.tu
 
 1.  **Navegue até a pasta do bot**: `cd cz7host_frp/discord_bot`
 2.  **Instale as dependências**: `pip install -r requirements.txt`
-3.  **Crie o arquivo de ambiente**: `touch .env`
-4.  **Edite o arquivo `.env`** com as seguintes variáveis:
+3.  **Crie e edite o arquivo `.env`** com as seguintes variáveis:
     ```ini
     # O token do seu bot do Discord
     DISCORD_TOKEN=seu_token_do_discord_aqui
@@ -76,20 +68,19 @@ Isso fará com que `tunnel.cz7host.com` e qualquer subdomínio como `meu-site.tu
 
     # O MESMO domínio base do servidor
     BASE_DOMAIN=tunnel.cz7host.com
+
+    # Endereço e porta para a API de callback do bot
+    BOT_API_HOST=127.0.0.1
+    BOT_API_PORT=8081
     ```
+    **Importante**: Se o bot e o servidor rodarem em máquinas diferentes, certifique-se de que o `BOT_CALLBACK_URL` no servidor aponte para o IP público e a porta correta do bot, e que o firewall permita a conexão.
 
 ### 4. Iniciando o Sistema
 
-- **Para iniciar o servidor**, vá para a pasta `cz7host_frp/server` e execute:
-  ```bash
-  python server.py
-  ```
-- **Para iniciar o bot**, vá para a pasta `cz7host_frp/discord_bot` e execute:
-  ```bash
-  python bot.py
-  ```
+- **Para iniciar o servidor**, vá para a pasta `cz7host_frp/server` e execute: `python server.py`
+- **Para iniciar o bot**, vá para a pasta `cz7host_frp/discord_bot` e execute: `python bot.py`
 
-Para produção, é recomendado usar um gerenciador de processos como `systemd` ou `pm2` para manter os scripts rodando.
+Para produção, é recomendado usar um gerenciador de processos como `systemd` ou `pm2`.
 
 ---
 
@@ -99,27 +90,22 @@ Bem-vindo ao CZ7 Host! Siga estes passos para expor seu projeto local para o mun
 
 ### 1. Crie seu Túnel
 
-- No nosso servidor do Discord, digite o comando:
+- No nosso servidor do Discord, digite o comando, especificando a porta do seu serviço local:
   ```
-  !tunel criar
+  !tunel criar 8080
   ```
-- O bot responderá e enviará uma **mensagem direta (DM)** com seu **ID do Túnel (`TUNNEL_ID`)**. Guarde-o com segurança!
+- O bot responderá e enviará uma **mensagem direta (DM)** com seu **ID do Túnel (`TUNNEL_ID`)**.
 
 ### 2. Configure o Cliente FRP
 
 1.  **Baixe a pasta `client`** do nosso repositório.
-2.  Certifique-se de ter o Python instalado.
-3.  Na pasta `client`, **instale as dependências**:
-    ```bash
-    pip install -r requirements.txt
-    ```
-4.  Crie um arquivo chamado `.env` na mesma pasta.
-5.  Abra o arquivo `.env` e adicione as seguintes linhas:
+2.  Na pasta `client`, **instale as dependências**: `pip install -r requirements.txt`
+3.  Crie um arquivo chamado `.env` e adicione as seguintes linhas:
     ```ini
     # O endereço IP do servidor CZ7 Host
     SERVER_IP=ip_do_servidor_cz7_host
 
-    # A porta do seu serviço local que você quer expor (ex: 8080 para um site)
+    # A porta do seu serviço local (a mesma que você usou no comando !tunel criar)
     LOCAL_PORT=8080
 
     # O ID do túnel que você recebeu do bot na DM
@@ -128,11 +114,8 @@ Bem-vindo ao CZ7 Host! Siga estes passos para expor seu projeto local para o mun
 
 ### 3. Inicie o Cliente
 
-- Com tudo configurado, execute o cliente:
-  ```bash
-  python client.py
-  ```
-- Se tudo estiver correto, você verá uma mensagem de sucesso. Seu serviço local agora está conectado!
+- Com tudo configurado, execute o cliente: `python client.py`
+- Se tudo estiver correto, você receberá uma **nova DM do bot** confirmando que seu túnel está **online e conectado**!
 
 ### 4. (Opcional) Aponte um Domínio
 
@@ -140,12 +123,12 @@ Bem-vindo ao CZ7 Host! Siga estes passos para expor seu projeto local para o mun
   ```
   !dominio apontar <SEU_TUNNEL_ID> <nome-do-seu-site>
   ```
-- **Exemplo**: `!dominio apontar f4a2-b6c8-e1d3 meu-portfolio`
-- O bot confirmará, e seu site estará acessível em `http://meu-portfolio.tunnel.cz7host.com`.
+- O bot confirmará, e seu site estará acessível em `http://nome-do-seu-site.tunnel.cz7host.com`.
 
 ### Comandos do Bot
 
 - `!ajuda`: Mostra todos os comandos.
-- `!tunel criar`: Cria um novo túnel.
+- `!tunel criar <porta_local>`: Cria um novo túnel para a porta especificada.
+- `!tunel status <ID_DO_TUNEL>`: Verifica o status de conexão de um túnel.
 - `!tunel deletar <ID_DO_TUNEL>`: Deleta um túnel.
 - `!dominio apontar <ID_DO_TUNEL> <subdominio>`: Aponta um subdomínio para seu túnel.
