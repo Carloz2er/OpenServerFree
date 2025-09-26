@@ -18,6 +18,7 @@ API_SECRET_KEY = os.getenv("API_SECRET_KEY")
 BASE_DOMAIN = os.getenv("BASE_DOMAIN", "tunnel.cz7host.local")
 BOT_API_HOST = os.getenv("BOT_API_HOST", "127.0.0.1")
 BOT_API_PORT = int(os.getenv("BOT_API_PORT", 8081))
+FRP_SERVER_IP = os.getenv("FRP_SERVER_IP") # IP público do servidor FRP para os clientes usarem
 
 # --- Cliente da API ---
 class FrpApiClient:
@@ -154,16 +155,21 @@ async def tunnel(ctx, action: str, *, args: str = None):
             await ctx.reply(f"❌ Falha ao criar túnel: {result.get('details', result['error'])}")
         else:
             tunnel_id = result.get('tunnel_id')
-            await ctx.reply(f"✅ Túnel criado com sucesso para a porta `{local_port}`! Enviei os detalhes para sua DM.")
+            public_port = result.get('public_port')
+            await ctx.reply(f"✅ Túnel criado com sucesso! Enviei os detalhes para sua DM.")
 
             embed = discord.Embed(
                 title="Detalhes do seu Novo Túnel",
                 description="Use as informações abaixo para configurar seu cliente FRP.",
                 color=discord.Color.green()
             )
+            embed.add_field(name="Endereço Público TCP", value=f"`{FRP_SERVER_IP}:{public_port}`", inline=False)
             embed.add_field(name="Tunnel ID", value=f"`{tunnel_id}`", inline=False)
-            embed.add_field(name="Porta Local Configurada", value=f"`{local_port}`", inline=False)
-            embed.add_field(name="Instruções", value=f"1. Baixe o cliente FRP.\n2. Crie um arquivo `.env`.\n3. Adicione `TUNNEL_ID={tunnel_id}`\n4. Adicione `LOCAL_PORT={local_port}`\n5. Rode o cliente.", inline=False)
+            embed.add_field(
+                name="Instruções de Configuração (`.env`)",
+                value=f"```ini\nSERVER_IP={FRP_SERVER_IP}\nLOCAL_PORT={local_port}\nTUNNEL_ID={tunnel_id}\n```",
+                inline=False
+            )
             await ctx.author.send(embed=embed)
 
     elif action == "deletar":
@@ -193,16 +199,16 @@ async def tunnel(ctx, action: str, *, args: str = None):
             status_text = "🟢 Conectado" if is_connected else "🔴 Desconectado"
             color = discord.Color.green() if is_connected else discord.Color.red()
 
-            embed = discord.Embed(
-                title=f"Status do Túnel: {tunnel_id[:8]}...",
-                color=color
-            )
+            embed = discord.Embed(title=f"Status do Túnel: {tunnel_id[:8]}...", color=color)
             embed.add_field(name="Status", value=status_text, inline=True)
-            embed.add_field(name="Porta Local", value=f"`{result.get('local_port', 'N/A')}`", inline=True)
+
+            public_port = result.get('public_port')
+            public_addr = f"`{FRP_SERVER_IP}:{public_port}`" if public_port else "N/A"
+            embed.add_field(name="Endereço Público", value=public_addr, inline=True)
 
             domain = result.get('domain')
             if domain:
-                embed.add_field(name="Domínio", value=f"http://{domain}", inline=False)
+                embed.add_field(name="Domínio HTTP", value=f"http://{domain}", inline=False)
 
             if is_connected:
                 embed.set_footer(text=f"Cliente conectado de: {result.get('client_addr', 'N/A')}")
