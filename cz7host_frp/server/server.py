@@ -17,6 +17,8 @@ HTTP_PORT = int(os.getenv("HTTP_PORT", 80))
 BASE_DOMAIN = os.getenv("BASE_DOMAIN", "tunnel.cz7host.local")
 API_SECRET_KEY = os.getenv("API_SECRET_KEY", "supersecretkey_for_discord_bot")
 BOT_CALLBACK_URL = os.getenv("BOT_CALLBACK_URL")
+PUBLIC_PORT_START = int(os.getenv("PUBLIC_PORT_START", 30000))
+PUBLIC_PORT_END = int(os.getenv("PUBLIC_PORT_END", 30100))
 
 # --- API (FastAPI) ---
 api = FastAPI(title="CZ7 Host FRP Management API")
@@ -26,6 +28,7 @@ api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 tunnels = {}  # {tunnel_id: {config}}
 pending_connections = {}  # {token: {public_reader, public_writer, initial_data}}
 domain_map = {}  # {hostname: tunnel_id}
+available_ports = set(range(PUBLIC_PORT_START, PUBLIC_PORT_END + 1))
 
 # --- Segurança da API ---
 async def get_api_key(key: str = Depends(api_key_header)):
@@ -177,15 +180,26 @@ async def handle_frp_client(client_reader, client_writer):
 
 @api.post("/tunnels", summary="Cria um novo túnel", dependencies=[Depends(get_api_key)])
 async def create_tunnel(user_id: str, local_port: int):
+    if not available_ports:
+        raise HTTPException(status_code=503, detail="No available public ports. Please try again later.")
+
+    public_port = available_ports.pop()
     tunnel_id = str(uuid.uuid4())
+
+    # Handler para conexões TCP diretas na porta pública
+    handler = lambda r, w: signal_new_connection(tunnel_id, r, w)
+    public_server = await asyncio.start_server(handler, SERVER_IP, public_port)
+
     tunnels[tunnel_id] = {
         "user_id": user_id,
         "local_port": local_port,
+        "public_port": public_port,
+        "public_server": public_server,
         "connected": False,
         "domain": None,
     }
-    print(f"API criou o túnel {tunnel_id} para o usuário {user_id} para a porta local {local_port}")
-    return {"tunnel_id": tunnel_id, "user_id": user_id, "local_port": local_port}
+    print(f"API criou o túnel {tunnel_id} (pública: {public_port}) para o usuário {user_id}")
+    return {"tunnel_id": tunnel_id, "public_port": public_port}
 
 @api.get("/tunnels/{tunnel_id}", summary="Obtém detalhes de um túnel específico", dependencies=[Depends(get_api_key)])
 async def get_tunnel_details(tunnel_id: str):
@@ -222,9 +236,22 @@ async def delete_tunnel(tunnel_id: str):
         raise HTTPException(status_code=404, detail="Tunnel not found")
 
     tunnel = tunnels.pop(tunnel_id)
+
+    # Devolve a porta ao pool
+    if 'public_port' in tunnel:
+        available_ports.add(tunnel['public_port'])
+        print(f"Porta {tunnel['public_port']} devolvida ao pool.")
+
+    # Para o servidor público
+    if 'public_server' in tunnel and tunnel['public_server']:
+        tunnel['public_server'].close()
+        await tunnel['public_server'].wait_closed()
+
+    # Remove o mapeamento de domínio
     if tunnel.get('domain') and tunnel['domain'] in domain_map:
         del domain_map[tunnel['domain']]
 
+    # Fecha a conexão do cliente se estiver ativa
     if tunnel.get('connected'):
         tunnel['control_writer'].close()
 
