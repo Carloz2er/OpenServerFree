@@ -2,6 +2,7 @@ import asyncio
 import os
 import uuid
 import uvicorn
+import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import APIKeyHeader
@@ -15,6 +16,7 @@ API_PORT = int(os.getenv("API_PORT", 8000))
 HTTP_PORT = int(os.getenv("HTTP_PORT", 80))
 BASE_DOMAIN = os.getenv("BASE_DOMAIN", "tunnel.cz7host.local")
 API_SECRET_KEY = os.getenv("API_SECRET_KEY", "supersecretkey_for_discord_bot")
+BOT_CALLBACK_URL = os.getenv("BOT_CALLBACK_URL")
 
 # --- API (FastAPI) ---
 api = FastAPI(title="CZ7 Host FRP Management API")
@@ -32,6 +34,33 @@ async def get_api_key(key: str = Depends(api_key_header)):
     return key
 
 # --- Lógica do Servidor TCP e HTTP ---
+
+async def notify_bot_of_connection(tunnel_id: str):
+    """Envia um callback para o bot informando que um túnel foi conectado."""
+    if not BOT_CALLBACK_URL:
+        return
+
+    if tunnel_id not in tunnels:
+        return
+
+    tunnel_data = tunnels[tunnel_id]
+    payload = {
+        "tunnel_id": tunnel_id,
+        "user_id": tunnel_data.get("user_id"),
+        "event": "connected"
+    }
+
+    try:
+        async with httpx.AsyncClient() as client:
+            headers = {"X-API-Key": API_SECRET_KEY}
+            response = await client.post(BOT_CALLBACK_URL, json=payload, headers=headers, timeout=5)
+            if response.status_code == 200:
+                print(f"[{tunnel_id}] Callback para o bot enviado com sucesso.")
+            else:
+                print(f"[{tunnel_id}] Erro ao enviar callback para o bot: {response.status_code} {response.text}")
+    except httpx.RequestError as e:
+        print(f"[{tunnel_id}] Falha ao conectar com o bot para callback: {e}")
+
 
 async def forward_data(reader, writer, name):
     try:
@@ -125,6 +154,7 @@ async def handle_frp_client(client_reader, client_writer):
                     'client_addr': client_addr
                 })
                 print(f"[{tunnel_id}] Cliente conectado de {client_addr}")
+                asyncio.create_task(notify_bot_of_connection(tunnel_id))
                 await client_reader.read() # Manter conexão para futuros sinais
             else:
                 client_writer.close()
@@ -145,16 +175,28 @@ async def handle_frp_client(client_reader, client_writer):
 
 # --- Endpoints da API ---
 
-@api.post("/tunnels", summary="Cria um novo túnel (placeholder)", dependencies=[Depends(get_api_key)])
-async def create_tunnel(user_id: str):
+@api.post("/tunnels", summary="Cria um novo túnel", dependencies=[Depends(get_api_key)])
+async def create_tunnel(user_id: str, local_port: int):
     tunnel_id = str(uuid.uuid4())
     tunnels[tunnel_id] = {
         "user_id": user_id,
+        "local_port": local_port,
         "connected": False,
         "domain": None,
     }
-    print(f"API criou o túnel {tunnel_id} para o usuário {user_id}")
-    return {"tunnel_id": tunnel_id, "user_id": user_id}
+    print(f"API criou o túnel {tunnel_id} para o usuário {user_id} para a porta local {local_port}")
+    return {"tunnel_id": tunnel_id, "user_id": user_id, "local_port": local_port}
+
+@api.get("/tunnels/{tunnel_id}", summary="Obtém detalhes de um túnel específico", dependencies=[Depends(get_api_key)])
+async def get_tunnel_details(tunnel_id: str):
+    if tunnel_id not in tunnels:
+        raise HTTPException(status_code=404, detail="Tunnel not found")
+
+    data = tunnels[tunnel_id]
+    # Clean data for JSON response
+    clean_data = {k: v for k, v in data.items() if not asyncio.iscoroutine(v) and not isinstance(v, (asyncio.StreamWriter, asyncio.base_events.Server))}
+    return clean_data
+
 
 @api.put("/tunnels/{tunnel_id}/domain", summary="Aponta um subdomínio para um túnel", dependencies=[Depends(get_api_key)])
 async def map_domain(tunnel_id: str, subdomain: str):

@@ -1,3 +1,5 @@
 discord.py
 python-dotenv
 httpx
+fastapi
+uvicorn[standard]
